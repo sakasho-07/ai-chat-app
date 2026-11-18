@@ -1,5 +1,11 @@
 
 import { google } from "@ai-sdk/google";
+import { anthropic } from "@ai-sdk/anthropic";
+import {
+    isValidMessageLength,
+    getRecentMessages,
+} from "@/app/lib/validate";
+
 import {
     convertToModelMessages,
     streamText,
@@ -7,6 +13,22 @@ import {
 } from "ai";
 
 export async function POST(req: Request) {
+    const provider = process.env.AI_PROVIDER ?? "google";
+
+    const apiKey =
+        provider === "anthropic"
+            ? process.env.ANTHROPIC_API_KEY
+            : process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+
+    if (!apiKey) {
+        console.error("AI APIキーが設定されていません。");
+
+        return new Response(
+            "AIサービスの設定が不足しています。",
+            { status: 500 }
+        );
+    }
+
     const { messages }: { messages: UIMessage[] } =
         await req.json();
 
@@ -21,7 +43,7 @@ export async function POST(req: Request) {
         .join("") ?? "";
 
     // 最新メッセージが長すぎる場合は拒否する
-    if (latestText.length > 1000) {
+    if (!isValidMessageLength(latestText)) {
         return new Response(
             "メッセージは1000文字以内で入力してください。",
             { status: 400 }
@@ -30,9 +52,12 @@ export async function POST(req: Request) {
 
 
     const result = streamText({
-        model: google("gemini-3-flash-preview"),
+        model:
+            process.env.AI_PROVIDER === "anthropic"
+                ? anthropic("claude-haiku-4-5")
+                : google("gemini-3-flash-preview"),
         system: "あなたは親切なAIアシスタントです。日本語でわかりやすく回答してください。",
-        messages: await convertToModelMessages(messages.slice(-10)),
+        messages: await convertToModelMessages(getRecentMessages(messages)),
         maxOutputTokens: 2000,
 
         onFinish: ({ finishReason, usage }) => {
